@@ -13,12 +13,14 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function HomeScreen() {
-  const [photos, setPhotos] = useState<string[]>([]); // ✅ explicitly typed
+  const [photos, setPhotos] = useState<string[]>([]);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
+  const [serverResult, setServerResult] = useState<any>(null); // Added state
   const cameraRef = useRef<CameraView | null>(null);
 
   const tabBarHeight = useBottomTabBarHeight();
+
   useEffect(() => {
     if (!permission) {
       requestPermission();
@@ -29,9 +31,40 @@ export default function HomeScreen() {
     if (cameraRef.current) {
       const photo = await cameraRef.current.takePictureAsync();
       if (photo?.uri) {
-        setPhotos((prev: string[]) => [photo.uri, ...prev]); // ✅ correct type
+        setPhotos((prev) => [photo.uri, ...prev]);
       }
       setCameraOpen(false);
+    }
+  };
+
+  const uploadPhotos = async () => {
+    if (photos.length === 0) {
+      console.warn("No photos to upload");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", {
+      uri: photos[0],
+      type: "image/jpeg",
+      name: "fridge.jpg",
+    } as any);
+
+    try {
+      const response = await fetch("http://192.168.1.103:3000/upload-photos", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to upload photo");
+      }
+
+      const result = await response.json();
+      console.log("Upload successful:", result);
+      setServerResult(result); // store server result in state
+    } catch (error) {
+      console.error("Error uploading photo:", error);
     }
   };
 
@@ -58,8 +91,6 @@ export default function HomeScreen() {
               justifyContent: "center",
               alignItems: "center",
               marginBottom: tabBarHeight - 25,
-              outlineColor: "blue",
-              outlineWidth: 4,
             }}
             ref={cameraRef}
             facing="back"
@@ -73,12 +104,22 @@ export default function HomeScreen() {
           <>
             <View style={styles.buttonContainer2}>
               <Button title="Open Camera" onPress={() => setCameraOpen(true)} />
+              <Button title="Upload Photo" onPress={uploadPhotos} />
             </View>
             <FlatList
               data={photos}
               keyExtractor={(_, index) => index.toString()}
               renderItem={renderPhoto}
             />
+            <View style={{ padding: 10 }}>
+              {serverResult?.items?.length > 0 ? (
+                serverResult.items.map((item: string, index: number) => (
+                  <Text key={index}>• {item}</Text>
+                ))
+              ) : (
+                <Text>No items detected</Text>
+              )}
+            </View>
           </>
         )}
       </View>
@@ -96,7 +137,6 @@ const styles = StyleSheet.create({
     width: "100%",
     justifyContent: "space-around",
     alignItems: "flex-end",
-    color: "white",
     marginBottom: 20,
   },
   preview: {
