@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { Link } from "expo-router";
+import { signOut } from "firebase/auth";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Button,
@@ -13,14 +15,16 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../../AuthProvider";
+import { auth } from "../../firebaseconfig";
 
 // Define interface for items with adjustable expiration
 interface FridgeItem {
   id: string;
   name: string;
   originalExpiration: string;
-  adjustedDays: number; // Days to add/subtract from original
-  createdDate: string; // ISO string of when item was added
+  adjustedDays: number;
+  createdDate: string;
 }
 
 export default function HomeScreen() {
@@ -28,19 +32,44 @@ export default function HomeScreen() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [serverResult, setServerResult] = useState<any>(null);
-  const [fridgeItems, setFridgeItems] = useState<FridgeItem[]>([]); // New state for processed items
+  const [fridgeItems, setFridgeItems] = useState<FridgeItem[]>([]);
   const cameraRef = useRef<CameraView | null>(null);
   const [photosUploaded, setPhotosUploaded] = useState(false);
 
   const tabBarHeight = useBottomTabBarHeight();
+  const { user } = useAuth();
 
   useEffect(() => {
-    if (!permission) {
-      requestPermission();
-    }
+    if (!permission) requestPermission();
   }, [permission]);
 
-  // Process server result into fridgeItems when serverResult changes
+  // Header component
+  const Header = () => (
+    <View style={styles.header}>
+      {user ? (
+        <>
+          <Text style={styles.welcomeText}>👋 Hello, {user.email}</Text>
+          <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={() => signOut(auth)}
+          >
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <View style={styles.authButtons}>
+          <Link href="../Login" style={styles.linkButton}>
+            <Text style={styles.linkText}>Login</Text>
+          </Link>
+          <Link href="../SignUp" style={styles.linkButton}>
+            <Text style={styles.linkText}>Signup</Text>
+          </Link>
+        </View>
+      )}
+    </View>
+  );
+
+  // Process server result into fridgeItems
   useEffect(() => {
     if (serverResult?.items?.length > 0) {
       const processedItems: FridgeItem[] = serverResult.items.map(
@@ -50,8 +79,8 @@ export default function HomeScreen() {
             id: `${name}-${index}`,
             name,
             originalExpiration: expiration,
-            adjustedDays: 0, // Start with no adjustment
-            createdDate: new Date().toISOString(), // Store creation timestamp
+            adjustedDays: 0,
+            createdDate: new Date().toISOString(),
           };
         }
       );
@@ -59,136 +88,76 @@ export default function HomeScreen() {
     }
   }, [serverResult]);
 
-  // Auto-decrement expiration dates every 24 hours
+  // Auto-update expiration days
   useEffect(() => {
-    const checkAndUpdateDays = () => {
+    const updateDays = () => {
       const now = new Date();
-      const currentDateString = now.toDateString();
-
-      setFridgeItems((prevItems) => {
-        return prevItems.map((item) => {
-          const itemCreatedDate = new Date(item.createdDate);
+      setFridgeItems((prevItems) =>
+        prevItems.map((item) => {
           const daysPassed = Math.floor(
-            (now.getTime() - itemCreatedDate.getTime()) / (1000 * 60 * 60 * 24)
+            (now.getTime() - new Date(item.createdDate).getTime()) /
+              (1000 * 60 * 60 * 24)
           );
-
-          // Calculate how many days should have been subtracted based on time passed
           const expectedAdjustment = -daysPassed;
-
-          // Only update if the current adjustment doesn't account for all passed days
-          if (item.adjustedDays > expectedAdjustment) {
-            return {
-              ...item,
-              adjustedDays: expectedAdjustment,
-            };
-          }
-
-          return item;
-        });
-      });
+          return item.adjustedDays > expectedAdjustment
+            ? { ...item, adjustedDays: expectedAdjustment }
+            : item;
+        })
+      );
     };
-
-    // Check immediately when component mounts
-    checkAndUpdateDays();
-
-    // Set up interval to check every hour (more frequent checking ensures accuracy)
-    const interval = setInterval(checkAndUpdateDays, 60 * 60 * 1000); // Check every hour
-
+    updateDays();
+    const interval = setInterval(updateDays, 60 * 60 * 1000);
     return () => clearInterval(interval);
-  }, []);
-
-  // Additional effect to check on app focus/visibility changes
-  useEffect(() => {
-    const handleAppStateChange = () => {
-      // Force a check when app becomes active
-      const now = new Date();
-
-      setFridgeItems((prevItems) => {
-        return prevItems.map((item) => {
-          const itemCreatedDate = new Date(item.createdDate);
-          const daysPassed = Math.floor(
-            (now.getTime() - itemCreatedDate.getTime()) / (1000 * 60 * 60 * 24)
-          );
-          const expectedAdjustment = -daysPassed;
-
-          if (item.adjustedDays > expectedAdjustment) {
-            return {
-              ...item,
-              adjustedDays: expectedAdjustment,
-            };
-          }
-
-          return item;
-        });
-      });
-    };
-
-    // You might want to add AppState listener here if you have access to it
-    // For now, this will check when the component re-renders
-    handleAppStateChange();
   }, []);
 
   const takePicture = async () => {
     if (cameraRef.current) {
       const photo = await cameraRef.current.takePictureAsync();
-      if (photo?.uri) {
-        setPhotos((prev) => [photo.uri, ...prev]);
-      }
+      if (photo?.uri) setPhotos((prev) => [photo.uri, ...prev]);
       setCameraOpen(false);
     }
   };
 
-  // Function to adjust expiration days (manual adjustments by user)
   const adjustExpirationDays = (itemId: string, change: number) => {
     setFridgeItems((prevItems) =>
       prevItems.map((item) => {
         if (item.id === itemId) {
-          // Calculate minimum allowed adjustment based on days passed
-          const now = new Date();
-          const itemCreatedDate = new Date(item.createdDate);
           const daysPassed = Math.floor(
-            (now.getTime() - itemCreatedDate.getTime()) / (1000 * 60 * 60 * 24)
+            (new Date().getTime() - new Date(item.createdDate).getTime()) /
+              (1000 * 60 * 60 * 24)
           );
           const minAdjustment = -daysPassed;
-
-          // Apply the change but don't go above the minimum required by time passage
           const newAdjustment = Math.min(
             item.adjustedDays + change,
             minAdjustment + 999
-          ); // Allow adding days beyond natural decay
-          return { ...item, adjustedDays: Math.max(-999, newAdjustment) }; // Prevent going too negative
+          );
+          return { ...item, adjustedDays: Math.max(-999, newAdjustment) };
         }
         return item;
       })
     );
   };
 
-  // Function to calculate display expiration
-  const getDisplayExpiration = (item: FridgeItem): string => {
-    const originalDaysMatch = item.originalExpiration.match(/(\d+)/);
-    if (!originalDaysMatch) return item.originalExpiration;
-
-    const originalDays = parseInt(originalDaysMatch[1]);
+  const getDisplayExpiration = (item: FridgeItem) => {
+    const match = item.originalExpiration.match(/(\d+)/);
+    if (!match) return item.originalExpiration;
+    const originalDays = parseInt(match[1]);
     const newDays = originalDays + item.adjustedDays;
-
-    if (newDays <= 0) {
-      return "Expired";
-    }
-
-    return item.originalExpiration.replace(/\d+/, newDays.toString());
+    return newDays <= 0
+      ? "Expired"
+      : item.originalExpiration.replace(/\d+/, newDays.toString());
   };
 
   const Item = ({ item }: { item: FridgeItem }) => {
     const displayExpiration = getDisplayExpiration(item);
     const isExpired = displayExpiration === "Expired";
 
-    // Calculate days since creation for display
     const now = new Date();
-    const itemCreatedDate = new Date(item.createdDate);
     const daysPassed = Math.floor(
-      (now.getTime() - itemCreatedDate.getTime()) / (1000 * 60 * 60 * 24)
+      (now.getTime() - new Date(item.createdDate).getTime()) /
+        (1000 * 60 * 60 * 24)
     );
-    const manualAdjustment = item.adjustedDays + daysPassed; // Manual adjustments beyond natural decay
+    const manualAdjustment = item.adjustedDays + daysPassed;
 
     return (
       <View
@@ -237,10 +206,7 @@ export default function HomeScreen() {
   };
 
   const uploadPhotos = async () => {
-    if (photos.length === 0) {
-      console.warn("No photos to upload");
-      return;
-    }
+    if (photos.length === 0) return console.warn("No photos to upload");
 
     const formData = new FormData();
     formData.append("file", {
@@ -250,20 +216,14 @@ export default function HomeScreen() {
     } as any);
 
     try {
-      const response = await fetch(
-        "https://65c40c9e8f52.ngrok-free.app/upload-photos",
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
+      const response = await fetch("192.168.1.127:3000/upload-photos", {
+        method: "POST",
+        body: formData,
+      });
 
-      if (!response.ok) {
-        throw new Error("Failed to upload photo");
-      }
+      if (!response.ok) throw new Error("Failed to upload photo");
 
       const result = await response.json();
-      console.log("Upload successful:", result);
       setServerResult(result);
       setPhotosUploaded(true);
     } catch (error) {
@@ -287,6 +247,9 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <View style={styles.container}>
+        {/* Page Header */}
+        <Header />
+
         {cameraOpen ? (
           <CameraView
             style={{
@@ -309,6 +272,7 @@ export default function HomeScreen() {
               <Button title="Open Camera" onPress={() => setCameraOpen(true)} />
               <Button title="Upload Photo" onPress={uploadPhotos} />
             </View>
+
             {!photosUploaded && (
               <FlatList
                 data={photos}
@@ -316,6 +280,7 @@ export default function HomeScreen() {
                 renderItem={renderPhoto}
               />
             )}
+
             <View style={{ marginBottom: 200, paddingHorizontal: 20 }}>
               {fridgeItems.length > 0 ? (
                 <FlatList
@@ -335,6 +300,7 @@ export default function HomeScreen() {
   );
 }
 
+// --- Styles ---
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 10 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
@@ -347,18 +313,13 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     marginBottom: 20,
   },
-  preview: {
-    width: "100%",
-    height: 200,
-    marginVertical: 10,
-    borderRadius: 10,
-  },
   buttonContainer2: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 20,
   },
+  preview: { width: "100%", height: 200, marginVertical: 10, borderRadius: 10 },
   itemContainer: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -378,17 +339,9 @@ const styles = StyleSheet.create({
     borderColor: "#ff6b6b",
     borderWidth: 1,
   },
-  textContainer: {
-    flex: 1,
-  },
-  expirationControls: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  adjustButton: {
-    padding: 4,
-  },
+  textContainer: { flex: 1 },
+  expirationControls: { flexDirection: "row", alignItems: "center", gap: 8 },
+  adjustButton: { padding: 4 },
   dateContainer: {
     flexDirection: "column",
     alignItems: "center",
@@ -398,28 +351,11 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     minWidth: 80,
   },
-  expiredDateContainer: {
-    backgroundColor: "#ffcccc",
-  },
-  itemText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
-  },
-  dateText: {
-    fontSize: 14,
-    color: "#555",
-    fontWeight: "500",
-  },
-  expiredText: {
-    color: "#ff6b6b",
-    fontWeight: "bold",
-  },
-  adjustmentText: {
-    fontSize: 10,
-    color: "#888",
-    fontStyle: "italic",
-  },
+  expiredDateContainer: { backgroundColor: "#ffcccc" },
+  itemText: { fontSize: 18, fontWeight: "600", color: "#333" },
+  dateText: { fontSize: 14, color: "#555", fontWeight: "500" },
+  expiredText: { color: "#ff6b6b", fontWeight: "bold" },
+  adjustmentText: { fontSize: 10, color: "#888", fontStyle: "italic" },
   daysPassedText: {
     fontSize: 12,
     color: "#999",
@@ -432,4 +368,28 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 50,
   },
+  container2: { flex: 1, padding: 10 },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 15,
+    paddingHorizontal: 10,
+  },
+  welcomeText: { fontSize: 16, fontWeight: "600", color: "#333" },
+  logoutButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: "#ff6b6b",
+    borderRadius: 8,
+  },
+  logoutText: { color: "#fff", fontWeight: "600" },
+  authButtons: { flexDirection: "row", gap: 12 },
+  linkButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: "#4ecdc4",
+    borderRadius: 8,
+  },
+  linkText: { color: "#fff", fontWeight: "600" },
 });
