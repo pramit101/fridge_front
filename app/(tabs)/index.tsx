@@ -39,13 +39,13 @@ export default function HomeScreen() {
     }
   };
 
-  const Item = ({ name }: { name: string }) => (
+  const Item = ({ name, expiration }: { name: string; expiration: string }) => (
     <View style={styles.itemContainer}>
       <View style={styles.textContainer}>
         <Text style={styles.itemText}>• {name}</Text>
       </View>
       <View style={styles.dateContainer}>
-        <Text style={styles.dateText}>Expiration: N/A</Text>
+        <Text style={styles.dateText}>{expiration}</Text>
         <Ionicons name="caret-up-circle" size={24} color="#555" />
       </View>
     </View>
@@ -137,7 +137,11 @@ export default function HomeScreen() {
                 <FlatList
                   data={serverResult.items}
                   keyExtractor={(item, index) => `${item}-${index}`}
-                  renderItem={({ item }) => <Item name={item} />}
+                  renderItem={({ item }) => {
+                    // Split the string into an array, e.g., ['milk', '5 days']
+                    const [name, expiration] = item.split(" | ");
+                    return <Item name={name} expiration={expiration} />;
+                  }}
                   contentContainerStyle={{ paddingTop: 20 }}
                 />
               ) : (
