@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useEffect, useRef, useState } from "react";
@@ -18,6 +19,7 @@ export default function HomeScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [serverResult, setServerResult] = useState<any>(null); // Added state
   const cameraRef = useRef<CameraView | null>(null);
+  const [photosUploaded, setPhotosUploaded] = useState(false);
 
   const tabBarHeight = useBottomTabBarHeight();
 
@@ -37,6 +39,18 @@ export default function HomeScreen() {
     }
   };
 
+  const Item = ({ name }: { name: string }) => (
+    <View style={styles.itemContainer}>
+      <View style={styles.textContainer}>
+        <Text style={styles.itemText}>• {name}</Text>
+      </View>
+      <View style={styles.dateContainer}>
+        <Text style={styles.dateText}>Expiration: N/A</Text>
+        <Ionicons name="caret-up-circle" size={24} color="#555" />
+      </View>
+    </View>
+  );
+
   const uploadPhotos = async () => {
     if (photos.length === 0) {
       console.warn("No photos to upload");
@@ -51,10 +65,13 @@ export default function HomeScreen() {
     } as any);
 
     try {
-      const response = await fetch("http://192.168.1.103:3000/upload-photos", {
-        method: "POST",
-        body: formData,
-      });
+      const response = await fetch(
+        "https://65c40c9e8f52.ngrok-free.app/upload-photos",
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
 
       if (!response.ok) {
         throw new Error("Failed to upload photo");
@@ -62,7 +79,8 @@ export default function HomeScreen() {
 
       const result = await response.json();
       console.log("Upload successful:", result);
-      setServerResult(result); // store server result in state
+      setServerResult(result);
+      setPhotosUploaded(true); // <-- Set state to true on success
     } catch (error) {
       console.error("Error uploading photo:", error);
     }
@@ -106,18 +124,24 @@ export default function HomeScreen() {
               <Button title="Open Camera" onPress={() => setCameraOpen(true)} />
               <Button title="Upload Photo" onPress={uploadPhotos} />
             </View>
-            <FlatList
-              data={photos}
-              keyExtractor={(_, index) => index.toString()}
-              renderItem={renderPhoto}
-            />
-            <View style={{ padding: 10 }}>
+            {/* Conditional rendering based on photosUploaded state */}
+            {!photosUploaded && (
+              <FlatList
+                data={photos}
+                keyExtractor={(_, index) => index.toString()}
+                renderItem={renderPhoto}
+              />
+            )}
+            <View style={{ marginBottom: 200, paddingHorizontal: 20 }}>
               {serverResult?.items?.length > 0 ? (
-                serverResult.items.map((item: string, index: number) => (
-                  <Text key={index}>• {item}</Text>
-                ))
+                <FlatList
+                  data={serverResult.items}
+                  keyExtractor={(item, index) => `${item}-${index}`}
+                  renderItem={({ item }) => <Item name={item} />}
+                  contentContainerStyle={{ paddingTop: 20 }}
+                />
               ) : (
-                <Text>No items detected</Text>
+                <Text style={styles.noItemsText}>No items detected</Text>
               )}
             </View>
           </>
@@ -150,5 +174,47 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 20,
+  },
+  itemContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#f0f0f0",
+    borderRadius: 15,
+    padding: 15,
+    marginVertical: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  textContainer: {
+    flex: 1,
+  },
+  dateContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#e0e0e0",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginLeft: 10,
+  },
+  itemText: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#333",
+  },
+  dateText: {
+    fontSize: 14,
+    color: "#555",
+    marginRight: 5,
+  },
+  noItemsText: {
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+    marginTop: 50,
   },
 });
